@@ -268,6 +268,14 @@ def parse_uploaded_document(uploaded_file):
   return text
 
 
+def handle_api_error(e):
+  """Format user-friendly error message for API limit issues."""
+  err_msg = str(e)
+  if "429" in err_msg or "RESOURCE_EXHAUSTED" in err_msg:
+    return "⏳ **Gemini API Limit Reached**: Daily quota exhausted for this API key. Please try again later or add billing in Google AI Studio."
+  return f"API Error: {err_msg}"
+
+
 # --- REPORT CARD & CHAT LOG PDF GENERATION FUNCTIONS ---
 def get_grade_letter(percentage):
   if percentage >= 90:
@@ -486,7 +494,6 @@ def generate_chat_pdf(username, subject_title, chat_history):
   )
   story.append(Spacer(1, 10))
 
-  # Flowable Paragraph stream logic to allow multi-page breaking of arbitrarily long responses
   for msg in chat_history:
     if msg["role"] == "user":
       story.append(Paragraph(f"<b>🧑‍🎓 {username}</b>", header_style_user))
@@ -499,7 +506,6 @@ def generate_chat_pdf(username, subject_title, chat_history):
       bg_col = HexColor("#f8fafc")
       border_col = HexColor("#cbd5e1")
 
-    # Split message into paragraphs by newline to let ReportLab flow cleanly across page boundaries
     paragraphs = [p.strip() for p in msg["content"].split("\n") if p.strip()]
     if not paragraphs:
       paragraphs = [msg["content"]]
@@ -509,7 +515,6 @@ def generate_chat_pdf(username, subject_title, chat_history):
       clean_p = p_text.replace("<", "&lt;").replace(">", "&gt;")
       msg_flowables.append([Paragraph(clean_p, msg_style)])
 
-    # Wrap each paragraph in its own row within a splitable table to prevent height overflow errors
     chunk_table = Table(msg_flowables, colWidths=[540])
     chunk_table.setStyle(
         TableStyle([
@@ -906,7 +911,7 @@ else:
             st.session_state.start_time = time.time()
             st.rerun()
           except Exception as e:
-            st.error(f"Execution Error: {e}")
+            st.error(handle_api_error(e))
 
     if st.session_state.assessment_questions:
       st.divider()
@@ -1045,7 +1050,7 @@ else:
               )
               st.rerun()
             except Exception as e:
-              st.error(f"Evaluation Error: {e}")
+              st.error(handle_api_error(e))
 
     if (
         "assessment_scores" in st.session_state
@@ -1102,7 +1107,7 @@ else:
             st.session_state.flashcards_csv = "\n".join(csv_lines)
             st.session_state.flashcard_data = cards
           except Exception as e:
-            st.error(f"Flashcard Generation Error: {e}")
+            st.error(handle_api_error(e))
 
     if "flashcard_data" in st.session_state and st.session_state.flashcard_data:
       st.divider()
@@ -1148,7 +1153,7 @@ else:
             )
             st.session_state.mindmap_code = dot_code
           except Exception as e:
-            st.error(f"Mind Map Error: {e}")
+            st.error(handle_api_error(e))
 
     if st.session_state.mindmap_code:
       st.divider()
@@ -1199,7 +1204,7 @@ else:
             st.audio(speech_buffer.getvalue(), format="audio/mp3")
 
           except Exception as e:
-            st.error(f"Vision Processing Error: {e}")
+            st.error(handle_api_error(e))
 
   # ==========================================
   # MODE 5: LECTURE MODE & AUDIO TTS CHAT
@@ -1265,7 +1270,7 @@ else:
             st.audio(audio_fp.getvalue(), format="audio/mp3")
 
           except Exception as e:
-            message_placeholder.error(f"API Error: {e}")
+            message_placeholder.error(handle_api_error(e))
 
     if st.session_state.chat_history:
       st.divider()
