@@ -5,4 +5,4 @@ python-docx
 python-pptx
 gTTS
 graphviz
-pillow
+reportlab
