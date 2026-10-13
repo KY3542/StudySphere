@@ -1,7 +1,10 @@
 import io
 import json
 import os
+import re
 import time
+import urllib.parse
+import urllib.request
 from datetime import datetime
 
 from docx import Document
@@ -238,6 +241,24 @@ def save_local_settings(username, q_count, s_time):
       f.write(f"study_time_min={s_time}\n")
   except Exception:
     pass
+
+
+def clean_graphviz_dot(raw_dot_text: str) -> str:
+  """Cleans raw model response and converts single quotes in Graphviz attributes to valid double quotes."""
+  if not raw_dot_text:
+    return ""
+
+  cleaned = re.sub(r'```(?:dot|graphviz)?', '', raw_dot_text, flags=re.IGNORECASE)
+  cleaned = cleaned.replace('```', '').strip()
+
+  start_match = re.search(r'((?:digraph|graph)\s+[\s\S]*)', cleaned, re.IGNORECASE)
+  if start_match:
+    cleaned = start_match.group(1)
+
+  # CRITICAL FIX: Replace invalid single quotes in DOT attributes with double quotes (e.g. color='#123' -> color="#123")
+  cleaned = re.sub(r"=\s*'([^']*)'", r'="\1"', cleaned)
+
+  return cleaned.strip()
 
 
 def parse_uploaded_document(uploaded_file):
@@ -1123,7 +1144,7 @@ else:
       )
 
   # ==========================================
-  # MODE 3: MIND MAP NODE VISUALIZER
+  # MODE 3: MIND MAP NODE VISUALIZER (DIRECT GRAPHIC RENDER)
   # ==========================================
   elif study_mode == "🧠 Mind Map Node Visualizer":
     st.subheader("🧠 Interactive Concept Mind Map Generator")
@@ -1134,34 +1155,57 @@ else:
 
     if st.button("⚡ Generate Mind Map Diagram", use_container_width=True):
       if client and (mindmap_topic or document_text):
-        with st.spinner("Mapping core nodes and relationships..."):
+        with st.spinner("Mapping core nodes and compiling visual chart..."):
           try:
             prompt = (
                 "Create a Graphviz DOT language graph representing the core"
                 " concepts and sub-topics.\nRules:\n- Return ONLY valid DOT"
                 " language syntax starting with 'digraph G {' and ending with"
-                " '}'.\n- Do not include markdown code block backticks.\n- Use"
-                " dark mode neon hex colors like bgcolor='#0a050d', node"
-                " fillcolor='#140b21', color='#d946ef', fontcolor='#ffffff'."
+                " '}'.\n- Do NOT use single quotes for attributes. Always use double quotes like bgcolor=\"#0a050d\" and color=\"#d946ef\".\n- Do not include markdown code block backticks or conversational text."
             )
             ctx = f"Topic: {mindmap_topic}\nMaterial: {document_text[:8000]}"
             response = client.models.generate_content(
                 model="gemini-2.5-flash", contents=[f"{ctx}\n\n{prompt}"]
             )
-            dot_code = (
-                response.text.replace("```dot", "").replace("```", "").strip()
-            )
+            
+            dot_code = clean_graphviz_dot(response.text)
             st.session_state.mindmap_code = dot_code
+
           except Exception as e:
             st.error(handle_api_error(e))
 
     if st.session_state.mindmap_code:
       st.divider()
+      
+      rendered = False
+      
+      # Try Primary Streamlit Native Renderer
       try:
-        graph = graphviz.Source(st.session_state.mindmap_code)
-        st.graphviz_chart(st.session_state.mindmap_code)
-      except Exception as e:
-        st.error(f"Graphviz Rendering Error: {e}")
+        st.graphviz_chart(st.session_state.mindmap_code, use_container_width=True)
+        rendered = True
+      except Exception:
+        pass
+
+      # Try Backup Graphviz Source Pipe
+      if not rendered:
+        try:
+          src = graphviz.Source(st.session_state.mindmap_code)
+          st.image(src.pipe(format='png'), use_container_width=True)
+          rendered = True
+        except Exception:
+          pass
+
+      # Try Fallback Kroki SVG Web API
+      if not rendered:
+        try:
+          url = "https://kroki.io/graphviz/svg/" + urllib.parse.quote(st.session_state.mindmap_code)
+          st.image(url, use_container_width=True)
+          rendered = True
+        except Exception:
+          st.error("Failed to render visual diagram. Please check DOT code below.")
+
+      with st.expander("🔍 View Raw DOT Code (Developer View)"):
+        st.code(st.session_state.mindmap_code, language="dot")
 
   # ==========================================
   # MODE 4: VISION NOTES & HANDWRITTEN READER
